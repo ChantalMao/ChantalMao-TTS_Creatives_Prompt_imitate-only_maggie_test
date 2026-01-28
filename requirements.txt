@@ -26,8 +26,11 @@ python-dotenv>=1.0
 # Utilities / typing
 typing-extensions>=4.5
 
-# Production WSGI (optional for certain deployments)
+# Production process manager / WSGI (optional)
 gunicorn>=20.1
 
 # Optional: official SDK for Gemini / Google Generative AI (uncomment if you use it)
 # google-generativeai>=0.1.0
+
+# Optional: async HTTP client for advanced upload flows (uncomment if used)
+# aiohttp>=3.8
