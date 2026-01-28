@@ -2,7 +2,7 @@
 Streamlit UI: 优化版提示词生成器前端（单文件）
 
 说明:
-- 美化了布局与样式，增加了素材审计预览、生成多条 Prompt、每条结果的复制与 regenerate（重生）流程。
+- 美化了布局与样式，增加了素材审计预览、生成多条 Prompt、每条结果的复制与 regenerate（再次生成）流程。
 - 依赖: streamlit, requests, pillow
 - 假设后端提供以下接口（需后端实现）:
   - POST {BACKEND_URL}/generate
