@@ -1,22 +1,10 @@
 """
 Streamlit UI: 优化版提示词生成器前端（单文件）
+- 新增功能：用户提供文案（可选），支持选择“手动输入”或“无”，并把该字段随表单提交给后端。
+- 其它说明与依赖同之前版本，后端需支持接收 user_copy 字段。
 
-说明:
-- 美化了布局与样式，增加了素材审计预览、生成多条 Prompt、每条结果的复制与 regenerate（再次生成）流程。
-- 依赖: streamlit, requests, pillow
-- 假设后端提供以下接口（需后端实现）:
-  - POST {BACKEND_URL}/generate
-    接收 multipart/form-data: image (file, optional), video (file, optional), product_name, selling_points (文本, 换行分隔), target_market, target_language, output_count, audio_option, bgm_style
-    返回 JSON: {"results":[{"id":"r1","audit":{...},"tradeoff":"...","av_plan":"...","final_prompt":"...","tags":["..."]}, ...]}
-  - POST {BACKEND_URL}/regenerate
-    接收 JSON: {"result_id": "...", "original_prompt": "...", "adjustment_type": "...", "note": "..."}
-    返回 JSON: {"result": {"id":"r1-v2","final_prompt":"...","note":"..."}}
-- 若后端不可用，UI 会显示友好错误并给出示例占位 prompt 以便继续 UX 流程。
-
-部署:
-- 把本文件放到仓库的 app/streamlit_app.py，Streamlit 部署页面 Main file path 填 app/streamlit_app.py
+放置路径: app/streamlit_app.py
 """
-
 import streamlit as st
 import requests
 from PIL import Image
@@ -51,7 +39,7 @@ st.markdown(
 
 # ------ 会话状态初始化 ------
 if "results" not in st.session_state:
-    st.session_state["results"] = []  # 每项: dict 包含 id, final_prompt, audit, tradeoff, av_plan, tags, versions
+    st.session_state["results"] = []
 if "last_request" not in st.session_state:
     st.session_state["last_request"] = {}
 if "regenerate_target" not in st.session_state:
@@ -63,10 +51,6 @@ if "upload_preview" not in st.session_state:
 BANNED_TOKENS = ["is placed", "stands", "sits", "is shown", "is displayed", "is on"]
 
 def check_dynamic_first(final_prompt_text: str):
-    """
-    检查 Final Prompt 中 [0-4s] 段是否包含禁止静态词汇，并是否包含至少一个动态关键词。
-    返回 (ok:bool, reasons:list)
-    """
     reasons = []
     if not final_prompt_text:
         reasons.append("Prompt 为空")
@@ -74,18 +58,15 @@ def check_dynamic_first(final_prompt_text: str):
     lower = final_prompt_text.lower()
     m = re.search(r"\[0-4s\](.*?)(?=\[4-8s\]|\[8-12s\]|$)", lower, re.S)
     first_segment = m.group(1) if m else lower.splitlines()[:5]
-    # 检查禁止词
     for token in BANNED_TOKENS:
         if token in first_segment:
             reasons.append(f"包含禁止静态词汇: '{token}'")
-    # 动态关键词检测
     dynamic_keywords = ["fast dolly", "rapid orbit", "handheld shake", "whip pan", "water", "explod", "grab", "drops", "transformation", "wind blowing", "smoke swirling", "light streaks"]
     if not any(k in first_segment for k in dynamic_keywords):
         reasons.append("开头缺少强动作/强物理/强运镜等动态关键词")
     return (len(reasons) == 0), reasons
 
 def render_copy_button(text: str, key: str):
-    """在 Streamlit 中通过 small JS 实现复制到剪贴板"""
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
     html = f"""
     <button onclick="navigator.clipboard.writeText('{escaped}')" style="background:#2563eb;color:white;padding:6px 10px;border-radius:6px;border:none;cursor:pointer;">
@@ -115,8 +96,8 @@ def call_backend_regenerate(result_id: str, original_prompt: str, adjustment_typ
         st.error(f"调用后端重生/regenerate 失败: {e}")
         return None
 
-def sample_prompt_stub(product_name="Product"):
-    return (
+def sample_prompt_stub(product_name="Product", user_copy=""):
+    base = (
         "Strictly animate the provided product image. Vertical 9:16, 12 seconds.\n"
         "[Dynamic Start Command: High motion velocity, no static frames].\n\n"
         "[0-4s] [IMMEDIATE ACTION]: Fast Dolly Zoom in towards the product; water explodes and splashes around the product instantly, camera performs a rapid orbit while handheld shake adds micro-jerk.\n"
@@ -125,6 +106,9 @@ def sample_prompt_stub(product_name="Product"):
         "Style tags: High motion, cinematic, 4k, no static shots.\n"
         "Maintain visual fidelity to the provided product image."
     )
+    if user_copy:
+        base += f"\n\n# User copy (provided): {user_copy}"
+    return base
 
 def safe_read_image(file_uploader):
     if not file_uploader:
@@ -139,11 +123,11 @@ def safe_read_image(file_uploader):
 # ------ UI: Header ------
 col1, col2 = st.columns([0.8, 0.2])
 with col1:
-    st.markdown('<div class="header"><div class="app-title">提示词生成器（商品图片＋视频模仿 12s ）</div><div class="sub">生成适配视频模仿的 12s  Prompt — 可重生/微调</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header"><div class="app-title">提示词生成器（高动态 12s 视频）</div><div class="sub">生成适配图生视频的 12s 强动态 Prompt — 可重生/微调</div></div>', unsafe_allow_html=True)
 with col2:
     st.button("Help", key="help_btn")
 
-st.write("")  # spacing
+st.write("")
 
 # ------ 左侧栏: 表单 ------
 with st.sidebar:
@@ -158,6 +142,15 @@ with st.sidebar:
     audio_option = st.selectbox("音频选项", ["TTS", "Human voice", "None"])
     bgm_style = st.text_input("BGM 风格 (例如: energetic pop)", value="energetic pop")
     motion_intensity = st.selectbox("运动强度", ["Light", "Medium", "Heavy"], index=2)
+
+    # ---------- 新增：用户提供文案 ----------
+    st.markdown("### 用户提供文案（可选）")
+    user_copy_mode = st.radio("请选择文案来源", ["无", "手动输入"], index=0)
+    user_copy = ""
+    if user_copy_mode == "手动输入":
+        user_copy = st.text_area("请输入用户提供的文案（可选，用于口播/卡片文案等）", value="", height=120)
+    # ---------- 结束新增 ----------
+
     generate_btn = st.button("生成提示词", type="primary")
 
 # ------ 素材审计预览 ------
@@ -195,18 +188,18 @@ with st.container():
             audit_summary["resolution"] = f'{info["w"]}x{info["h"]}, mode={info["mode"]}'
         if video_file:
             audit_summary["video"] = "✅ 已上传参考视频"
+        # 显示是否有用户提供文案
+        audit_summary["user_copy"] = "已提供" if user_copy_mode == "手动输入" and user_copy.strip() else "无"
         st.json(audit_summary)
 
 # ------ 生成按钮逻辑 ------
 if generate_btn:
-    # 验证必要字段
     if not product_name:
         st.error("请填写商品名称。")
     elif not selling_points.strip():
         st.error("请填写至少一条商品卖点。")
     else:
         with st.spinner("正在提交生成请求…（可能需要几秒到几十秒）"):
-            # 准备表单与文件
             form = {
                 "product_name": product_name,
                 "selling_points": selling_points,
@@ -216,6 +209,8 @@ if generate_btn:
                 "audio_option": audio_option,
                 "bgm_style": bgm_style,
                 "motion_intensity": motion_intensity,
+                # 将用户提供文案随表单提交（可能为空）
+                "user_copy": user_copy if user_copy_mode == "手动输入" else ""
             }
             files = {}
             if image_file:
@@ -226,9 +221,7 @@ if generate_btn:
             resp = call_backend_generate(form, files)
             if resp and isinstance(resp, dict) and "results" in resp:
                 results = resp["results"]
-                # 规范化并存入 session_state
                 for r in results:
-                    # ensure id exists
                     r_id = r.get("id") or str(uuid.uuid4())
                     entry = {
                         "id": r_id,
@@ -238,25 +231,27 @@ if generate_btn:
                         "av_plan": r.get("av_plan", ""),
                         "tags": r.get("tags", []),
                         "versions": [r.get("final_prompt", "")],
+                        # 后端可能回传 user_copy 回显，这里也保存
+                        "user_copy": r.get("user_copy", form.get("user_copy",""))
                     }
                     st.session_state["results"].append(entry)
                 st.success(f"生成完成，共 {len(results)} 条结果已添加。")
             else:
-                # 后端不可用或返回异常：使用占位示例以保持流程
                 st.warning("后端不可用或返回异常，已使用示例 Prompt 填充以便继续体验。")
                 for i in range(output_count):
                     entry = {
                         "id": f"stub-{uuid.uuid4().hex[:6]}",
-                        "final_prompt": sample_prompt_stub(product_name),
+                        "final_prompt": sample_prompt_stub(product_name, user_copy if user_copy_mode == "手动输入" else ""),
                         "audit": {"image": "OK" if image_file else "NO_IMAGE"},
                         "tradeoff": "示例 Trade-off（后端不可用）",
                         "av_plan": "示例 AV Plan",
                         "tags": ["demo", "sample"],
-                        "versions": [sample_prompt_stub(product_name)],
+                        "versions": [sample_prompt_stub(product_name, user_copy if user_copy_mode == "手动输入" else "")],
+                        "user_copy": user_copy if user_copy_mode == "手动输入" else ""
                     }
                     st.session_state["results"].append(entry)
 
-# ------ Regenerate panel: 当用户点击某条结果的 Regenerate 后在页面顶部显示选项面板 ------
+# ------ Regenerate panel ------
 if st.session_state["regenerate_target"] is not None:
     idx = st.session_state["regenerate_target"]
     if 0 <= idx < len(st.session_state["results"]):
@@ -268,6 +263,9 @@ if st.session_state["regenerate_target"] is not None:
         with colx1:
             preset = st.selectbox("快速预设", ["increase_motion", "slower_pacing", "emphasize_texture", "localize_dialogue", "only_change_audio"], index=0, key=f"preset_{idx}")
             note = st.text_area("额外说明（可选）", value="", key=f"note_{idx}", height=80)
+            # 可修改是否同时替换用户提供文案（展示当前）
+            st.markdown("用户提供文案（当前）")
+            st.write(target.get("user_copy", "(无)"))
         with colx2:
             st.markdown("原始 Prompt（只读）")
             st.text_area("原 Prompt", value=target["final_prompt"], height=200, key=f"orig_prompt_{idx}", disabled=True)
@@ -276,11 +274,11 @@ if st.session_state["regenerate_target"] is not None:
                     resp = call_backend_regenerate(target["id"], target["final_prompt"], preset, note)
                     if resp and "result" in resp:
                         new = resp["result"]
-                        # append version and update
                         target["versions"].append(new.get("final_prompt", ""))
                         target["final_prompt"] = new.get("final_prompt", "")
-                        # set back
-                        st.session_state["results"][idx] = target
+                        # 后端可能返回新的 user_copy 或保留原值
+                        if "user_copy" in new:
+                            target["user_copy"] = new["user_copy"]
                         st.success("重生成功，已替换当前 Prompt（历史版本保留）。")
                     else:
                         st.warning("后端重生失败，已使用示例变体填充。")
@@ -319,16 +317,17 @@ else:
                     st.write(res.get("av_plan","(无)"))
                     st.markdown("**Trade-off（合规/风格说明）**")
                     st.write(res.get("tradeoff","(无)"))
-                # copy + download
+                    # 显示用户提供文案（如有）
+                    if res.get("user_copy"):
+                        st.markdown("**用户提供文案**")
+                        st.write(res.get("user_copy"))
                 render_copy_button(res.get("final_prompt",""), key=f"copy_{i}")
                 st.download_button(label="下载 Prompt (.txt)", data=res.get("final_prompt",""), file_name=f"prompt_{res['id']}.txt", mime="text/plain")
             with cols[1]:
-                # actions: Regenerate, View versions
                 if st.button("Regenerate", key=f"regen_{i}"):
                     st.session_state["regenerate_target"] = i
                     st.experimental_rerun()
                 if st.button("Edit & Optimize", key=f"edit_{i}"):
-                    # put editable text into session and show below in expander
                     st.session_state["edit_idx"] = i
                 if st.button("Show versions", key=f"ver_{i}"):
                     with st.expander(f"版本历史 #{i+1}", expanded=True):
@@ -337,7 +336,6 @@ else:
                             st.code(v, language="text")
                             st.download_button(label=f"下载 v{vi+1}", data=v, file_name=f"prompt_{res['id']}_v{vi+1}.txt", mime="text/plain")
 
-    # 编辑并优化（在结果列表下方显示可编辑 panel）
     if st.session_state.get("edit_idx", None) is not None:
         idx = st.session_state["edit_idx"]
         if 0 <= idx < len(st.session_state["results"]):
@@ -347,7 +345,6 @@ else:
             coly1, coly2 = st.columns([1,1])
             with coly1:
                 if st.button("Optimize & Validate", key=f"opt_{idx}"):
-                    # 这里调用后端验证并优化（假设后端实现 validate_and_optimize）
                     try:
                         resp = requests.post(f"{BACKEND_URL.rstrip('/')}/validate_and_optimize", json={"prompt": txt}, timeout=120)
                         resp.raise_for_status()
@@ -371,8 +368,9 @@ else:
 st.markdown(
     """
     ---
-    **说明**: 本前端示例强调 UX：素材审计、生成、查看 Prompt、复制、下载与重生（Regenerate）。  
-    - 若你已有后端，请确保 BACKEND_URL 指向后端并实现 /generate, /regenerate, /validate_and_optimize 接口。  
-    - 若部署到 Streamlit Cloud，请在 Secrets 中配置 BACKEND_URL（或在后端同域部署）。  
+    **说明**:
+    - 新增“用户提供文案”输入：在侧栏选择“手动输入”并填写文本，或选择“无”。该字段会随生成请求提交到后端（字段名: user_copy）。
+    - 若后端实现，会在后端返回结果中回显 user_copy（并保存在每个结果条目）。
+    - 若你需要我帮你把后端接收 user_copy 的接口示例代码也补充，请告诉我。
     """
 )
