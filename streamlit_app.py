@@ -123,7 +123,7 @@ def safe_read_image(file_uploader):
 # ------ UI: Header ------
 col1, col2 = st.columns([0.8, 0.2])
 with col1:
-    st.markdown('<div class="header"><div class="app-title">提示词生成器（高动态 12s 视频）</div><div class="sub">生成适配图生视频的 12s 强动态 Prompt — 可重生/微调</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header"><div class="app-title">sora-2提示词生成器（用于生成tt 12s 广告素材）</div><div class="sub">将您的商品图片做出参考视频的效果 — 可重生/微调</div></div>', unsafe_allow_html=True)
 with col2:
     st.button("Help", key="help_btn")
 
